@@ -1,0 +1,279 @@
+/* Welcome Screen */
+#welcome-screen {
+    animation: fadeIn 0.5s ease-in;
+}
+
+#welcome-screen.hidden {
+    animation: fadeOut 0.5s ease-out forwards;
+    pointer-events: none;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+    }
+    to {
+        opacity: 1;
+    }
+}
+
+@keyframes fadeOut {
+    from {
+        opacity: 1;
+    }
+    to {
+        opacity: 0;
+    }
+}
+
+/* Custom Leaflet marker styles */
+.leaflet-marker-icon {
+    transition: transform 0.3s ease;
+}
+
+.leaflet-marker-icon:hover {
+    transform: scale(1.2);
+}
+
+/* Moving marker icon */
+.moving-marker-icon {
+    background: transparent !important;
+    border: none !important;
+}
+
+.moving-marker-icon svg {
+    filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.3));
+}
+
+/* Custom marker popup styles */
+.leaflet-popup-content-wrapper {
+    border-radius: 8px;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+.leaflet-popup-content {
+    margin: 12px;
+    font-family: system-ui, -apple-system, sans-serif;
+}
+
+/* Polyline animation */
+.leaflet-interactive {
+    stroke-dasharray: 10;
+    animation: dash 30s linear infinite;
+}
+
+@keyframes dash {
+    to {
+        stroke-dashoffset: -1000;
+    }
+}
+
+/* Custom scrollbar for drawer */
+#drawer .overflow-y-auto::-webkit-scrollbar {
+    width: 6px;
+}
+
+#drawer .overflow-y-auto::-webkit-scrollbar-track {
+    background: #f1f1f1;
+    border-radius: 3px;
+}
+
+#drawer .overflow-y-auto::-webkit-scrollbar-thumb {
+    background: #888;
+    border-radius: 3px;
+}
+
+#drawer .overflow-y-auto::-webkit-scrollbar-thumb:hover {
+    background: #555;
+}
+
+/* Rating star animations */
+.star-rating {
+    cursor: pointer;
+    transition: transform 0.2s ease, color 0.2s ease;
+}
+
+.star-rating:hover {
+    transform: scale(1.2);
+}
+
+.star-rating.active {
+    color: #f97316;
+}
+
+.star-rating.inactive {
+    color: #d1d5db;
+}
+
+.star-rating i {
+    width: 24px;
+    height: 24px;
+}
+
+/* Event item hover effect */
+.event-item {
+    transition: background-color 0.2s ease, transform 0.2s ease;
+    padding: 12px;
+    border-radius: 8px;
+    background-color: #f3f4f6;
+    cursor: pointer;
+}
+
+.event-item:hover {
+    background-color: #e5e7eb;
+    transform: translateX(4px);
+}
+
+/* Modal animation */
+#modal > div {
+    animation: modalFadeIn 0.3s ease;
+}
+
+@keyframes modalFadeIn {
+    from {
+        opacity: 0;
+        transform: scale(0.95);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+/* Transit banner animation */
+#transit-banner {
+    transition: transform 0.5s ease-in-out;
+}
+
+#transit-banner.show {
+    transform: translateY(0);
+}
+
+#transit-banner.hide {
+    transform: translateY(-100%);
+}
+
+/* Photo hover effect */
+.photo-item {
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.photo-item:hover {
+    transform: scale(1.02);
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.15);
+}
+
+/* Modal images - vertical stack */
+#modal-images {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+/* Drawer transition */
+#drawer {
+    transition: transform 0.3s ease-in-out, max-height 0.3s ease-in-out;
+}
+
+/* Desktop: side drawer */
+@media (min-width: 640px) {
+    #drawer {
+        position: absolute;
+        top: 0;
+        right: 0;
+        bottom: auto;
+        left: auto;
+        height: 100%;
+        width: 20rem;
+        transform: translateX(100%);
+        border-radius: 0;
+    }
+    
+    #drawer.open {
+        transform: translateX(0);
+    }
+    
+    #drawer.closed {
+        transform: translateX(100%);
+    }
+    
+    #drawer.expanded,
+    #drawer.collapsed {
+        max-height: 100%;
+    }
+    
+    #drawer-handle,
+    #toggle-drawer {
+        display: none;
+    }
+}
+
+/* Mobile: bottom sheet */
+@media (max-width: 639px) {
+    #drawer {
+        max-height: 40vh;
+        transform: translateY(100%);
+        border-radius: 20px 20px 0 0;
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        top: auto;
+        display: flex;
+        flex-direction: column;
+    }
+    
+    #drawer.open {
+        transform: translateY(0);
+    }
+    
+    #drawer.closed {
+        transform: translateY(100%);
+    }
+    
+    #drawer.expanded {
+        max-height: 85vh;
+    }
+    
+    #drawer.collapsed {
+        max-height: 40vh;
+    }
+    
+    #drawer > div {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+    }
+    
+    #drawer .flex-1 {
+        flex: 1;
+        overflow-y: auto;
+        min-height: 0;
+    }
+}
+
+/* Button ripple effect */
+button {
+    position: relative;
+    overflow: hidden;
+}
+
+button::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 0;
+    height: 0;
+    background: rgba(255, 255, 255, 0.3);
+    border-radius: 50%;
+    transform: translate(-50%, -50%);
+    transition: width 0.3s, height 0.3s;
+    pointer-events: none;
+}
+
+button:active::after {
+    width: 200px;
+    height: 200px;
+}
