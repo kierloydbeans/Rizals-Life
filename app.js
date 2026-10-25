@@ -3,6 +3,7 @@ let MAPTILER_API_KEY = window.MAPTILER_API_KEY || 'i_will_input_my_api_key_mysel
 let SUPABASE_URL = window.SUPABASE_URL || '';
 let SUPABASE_ANON_KEY = window.SUPABASE_ANON_KEY || '';
 let map, markers = [], route, movingMarker, maptilerLayer, currentLocationId;
+let supabaseClient, stopFeedbackChannel, journeyFeedbackChannel;
 let commentsPage = 0;
 const COMMENTS_PAGE_SIZE = 3;
 let journeyFeedbackPage = 0;
@@ -23,7 +24,7 @@ async function loadMapTilerKey() {
         }
         const supabaseUrl = envText.match(/^SUPABASE_URL=(.+)$/m);
         const supabaseKey = envText.match(/^SUPABASE_ANON_KEY=(.+)$/m);
-        if (!SUPABASE_URL && supabaseUrl) SUPABASE_URL = supabaseUrl[1].trim();
+        if (!SUPABASE_URL && supabaseUrl) SUPABASE_URL = supabaseUrl[1].trim().replace(/\/rest(?:\/v1)?\/?$/, '');
         if (!SUPABASE_ANON_KEY && supabaseKey) SUPABASE_ANON_KEY = supabaseKey[1].trim();
     } catch (error) {
         console.warn('MapTiler key could not be loaded from .env; use a local server or window.MAPTILER_API_KEY.', error);
@@ -42,6 +43,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 function initApp() {
     registerOfflineCache();
     applyTheme();
+    initRealtime();
     map = L.map('map', { zoomControl: false, minZoom: 2 }).setView(rizalData[0].coordinates, 12);
     L.control.zoom({ position: 'bottomleft' }).addTo(map);
     maptilerLayer = new L.MaptilerLayer({ apiKey: MAPTILER_API_KEY, style: mapStyleId() }).addTo(map);
@@ -60,7 +62,7 @@ function initApp() {
 }
 
 function registerOfflineCache() {
-    if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js?v=20261101').catch(error => console.warn('Offline cache unavailable:', error));
+    if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js?v=20261120').catch(error => console.warn('Offline cache unavailable:', error));
 }
 
 function tilePoint(lat, lng, zoom) {
@@ -126,6 +128,7 @@ function updateDrawer(location) {
     commentsPage = 0;
     ensureCommentsPagination();
     loadStopFeedback(location.id);
+    subscribeToStopFeedback(location.id);
     const next = rizalData.find(item => item.id === location.next_stop_id); document.getElementById('next-stop-text').textContent = next ? `Next: ${next.location_name}` : 'Journey complete'; document.getElementById('next-stop-btn').disabled = false;
 }
 
@@ -142,6 +145,39 @@ async function supabaseRequest(path, options = {}, withMeta = false) {
     const contentRange = response.headers.get('content-range') || '';
     const total = Number(contentRange.split('/')[1]) || (Array.isArray(data) ? data.length : 0);
     return { data: data || [], total };
+}
+
+function initRealtime() {
+    if (!window.supabase || !SUPABASE_URL || !SUPABASE_ANON_KEY || SUPABASE_URL.includes('your-project')) return;
+    supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    journeyFeedbackChannel = supabaseClient
+        .channel('journey-feedback-stream')
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'journey_feedback' }, () => {
+            const modal = document.getElementById('journey-feedbacks-modal');
+            if (modal && !modal.classList.contains('hidden')) loadJourneyFeedbacks();
+        })
+        .subscribe(status => {
+            if (status === 'CHANNEL_ERROR') console.warn('Journey feedback realtime channel could not connect.');
+        });
+}
+
+async function subscribeToStopFeedback(stopId) {
+    if (!supabaseClient) return;
+    if (stopFeedbackChannel) await supabaseClient.removeChannel(stopFeedbackChannel);
+    stopFeedbackChannel = supabaseClient
+        .channel(`stop-feedback-${stopId}`)
+        .on('postgres_changes', {
+            event: 'INSERT',
+            schema: 'public',
+            table: 'stop_feedback',
+            filter: `stop_id=eq.${stopId}`
+        }, payload => {
+            if (String(payload.new?.stop_id) !== String(currentLocationId)) return;
+            loadStopFeedback(currentLocationId);
+        })
+        .subscribe(status => {
+            if (status === 'CHANNEL_ERROR') console.warn(`Stop feedback realtime channel failed for stop ${stopId}.`);
+        });
 }
 
 function renderJourneyFeedbacks(feedbacks) { const list = document.getElementById('journey-feedbacks-list'); list.replaceChildren(); if (!feedbacks.length) { list.innerHTML = '<p class="feedback-status">No journey reflections yet. Be the first to share one.</p>'; return; } feedbacks.forEach(feedback => { const card = document.createElement('article'); card.className = 'journey-feedback-card'; const header = document.createElement('div'); const name = document.createElement('strong'); name.textContent = feedback.display_name || 'Anonymous'; const rating = document.createElement('span'); rating.textContent = feedback.rating ? `${'★'.repeat(feedback.rating)}${'☆'.repeat(5 - feedback.rating)}` : 'Journey note'; header.append(name, rating); const comment = document.createElement('p'); comment.textContent = feedback.comment; const date = document.createElement('small'); date.textContent = feedback.created_at ? new Date(feedback.created_at).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) : ''; card.append(header, comment, date); list.appendChild(card); }); }

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'rizal-footsteps-v4';
+const CACHE_NAME = 'rizal-footsteps-v5';
 const APP_SHELL = ['./', './index.html', './style.css', './app.js', './data.js', './joserizal.svg', './vendor/maptiler-sdk.css', './vendor/maptiler-sdk.umd.min.js', './vendor/leaflet-maptilersdk.js'];
 
 self.addEventListener('install', event => {

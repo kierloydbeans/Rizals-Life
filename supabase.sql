@@ -25,3 +25,26 @@ create policy "Anyone can add journey feedback" on public.journey_feedback for i
 
 create index if not exists stop_feedback_stop_id_created_at_idx on public.stop_feedback (stop_id, created_at desc);
 create index if not exists journey_feedback_created_at_idx on public.journey_feedback (created_at desc);
+
+-- Enable Supabase Realtime for live comment and reflection updates.
+do $$
+begin
+    if exists (select 1 from pg_publication where pubname = 'supabase_realtime') then
+        if not exists (
+            select 1 from pg_publication_rel pr
+            join pg_publication p on p.oid = pr.prpubid
+            where p.pubname = 'supabase_realtime'
+              and pr.prrelid = 'public.stop_feedback'::regclass
+        ) then
+            execute 'alter publication supabase_realtime add table public.stop_feedback';
+        end if;
+        if not exists (
+            select 1 from pg_publication_rel pr
+            join pg_publication p on p.oid = pr.prpubid
+            where p.pubname = 'supabase_realtime'
+              and pr.prrelid = 'public.journey_feedback'::regclass
+        ) then
+            execute 'alter publication supabase_realtime add table public.journey_feedback';
+        end if;
+    end if;
+end $$;
