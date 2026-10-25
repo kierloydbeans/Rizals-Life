@@ -7,6 +7,7 @@ let commentsPage = 0;
 const COMMENTS_PAGE_SIZE = 3;
 let journeyFeedbackPage = 0;
 const JOURNEY_FEEDBACK_PAGE_SIZE = 5;
+const JOURNEY_ANIMATION_DURATION = 1800;
 let ratings = JSON.parse(localStorage.getItem('rizalLocationRatings') || '{}');
 let theme = localStorage.getItem('rizalTheme') || 'light';
 
@@ -97,17 +98,20 @@ async function prefetchRouteVectorTiles() {
 
 function chooseLocation(location, animate = true) {
     const previous = rizalData.find(item => item.id === currentLocationId);
-    if (previous && previous.id !== location.id) animateJourney(previous, location);
+    const isMoving = Boolean(previous && previous.id !== location.id);
+    const isMobile = window.matchMedia('(max-width: 700px)').matches;
+    if (isMoving) { animateJourney(previous, location); if (isMobile) { document.getElementById('drawer').classList.add('traveling'); closeDrawer(); } }
     currentLocationId = location.id;
     if (animate) map.flyTo(location.coordinates, 12, { duration: 1.1 });
-    updateDrawer(location); openDrawer();
+    updateDrawer(location);
+    if (isMoving && isMobile) window.setTimeout(() => { openDrawer(); window.setTimeout(() => document.getElementById('drawer').classList.remove('traveling'), 500); }, JOURNEY_ANIMATION_DURATION); else openDrawer();
 }
 
 function animateJourney(from, to) {
     if (movingMarker) map.removeLayer(movingMarker);
     const icon = L.divIcon({ className: 'journey-marker', html: '<span class="kalesa-icon" aria-label="horse-drawn carriage">♞</span>', iconSize: [42, 42], iconAnchor: [21, 21] });
     movingMarker = L.marker(from.coordinates, { icon, zIndexOffset: 1000 }).addTo(map);
-    const started = performance.now(), duration = 1800;
+    const started = performance.now(), duration = JOURNEY_ANIMATION_DURATION;
     const frame = now => { if (!movingMarker) return; const p = Math.min((now - started) / duration, 1); movingMarker.setLatLng([from.coordinates[0] + (to.coordinates[0] - from.coordinates[0]) * p, from.coordinates[1] + (to.coordinates[1] - from.coordinates[1]) * p]); if (p < 1) requestAnimationFrame(frame); else { map.removeLayer(movingMarker); movingMarker = null; } };
     requestAnimationFrame(frame);
 }
@@ -157,8 +161,8 @@ async function submitStopFeedback(event) { event.preventDefault(); const status 
 function resetJourneyFeedbackModal() { document.getElementById('journey-feedback-form-wrap').classList.remove('hidden'); document.getElementById('journey-thank-you').classList.add('hidden'); document.getElementById('reflection-eyebrow').textContent = 'Journey complete'; document.getElementById('reflection-title').textContent = 'Leave a reflection'; }
 function showJourneyThankYou() { document.getElementById('journey-feedback-form-wrap').classList.add('hidden'); document.getElementById('journey-thank-you').classList.remove('hidden'); document.getElementById('reflection-eyebrow').textContent = 'Thank you for visiting'; document.getElementById('reflection-title').textContent = 'Tour complete'; }
 async function submitJourneyFeedback(event) { event.preventDefault(); const status = document.getElementById('journey-feedback-status'); const comment = document.getElementById('journey-feedback-comment').value.trim(); if (!comment) { showJourneyThankYou(); return; } status.textContent = 'Posting…'; try { await supabaseRequest('journey_feedback', { method: 'POST', headers: { Prefer: 'return=minimal' }, body: JSON.stringify({ rating: window.journeyRating || null, comment, display_name: document.getElementById('journey-feedback-name').value.trim() || 'Anonymous' }) }); event.target.reset(); showJourneyThankYou(); } catch (error) { status.textContent = 'Could not post yet. Check your Supabase configuration.'; console.warn(error); } }
-function openDrawer() { document.getElementById('drawer').classList.remove('closed'); document.getElementById('drawer').classList.add('open'); }
-function closeDrawer() { document.getElementById('drawer').classList.remove('open'); document.getElementById('drawer').classList.add('closed'); }
+function openDrawer() { document.getElementById('drawer').classList.remove('closed'); document.getElementById('drawer').classList.add('open'); document.getElementById('journey-feedbacks-toggle')?.classList.add('drawer-open'); }
+function closeDrawer() { document.getElementById('drawer').classList.remove('open'); document.getElementById('drawer').classList.add('closed'); document.getElementById('journey-feedbacks-toggle')?.classList.remove('drawer-open'); }
 function openModal(event) { document.getElementById('modal-title').textContent = event.title; document.getElementById('modal-description').textContent = event.description; const images = document.getElementById('modal-images'); images.innerHTML = ''; (event.images || []).slice(0, 2).forEach((src, i) => { const img = document.createElement('img'); img.src = src; img.alt = `${event.title} image ${i + 1}`; img.onerror = () => img.remove(); images.appendChild(img); }); document.getElementById('modal').classList.remove('hidden'); }
 function closeModal() { document.getElementById('modal').classList.add('hidden'); }
 function bindEvents() {
