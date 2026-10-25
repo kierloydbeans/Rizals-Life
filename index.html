@@ -1,138 +1,50 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Rizal Footsteps: An Interactive Spatial Map of Jose Rizal's Life</title>
-    
-    <!-- Tailwind CSS CDN -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    
-    <!-- Leaflet CSS CDN -->
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    
-    <!-- Lucide Icons CDN -->
-    <script src="https://unpkg.com/lucide@latest"></script>
-    
-    <!-- Custom CSS -->
-    <link rel="stylesheet" href="style.css">
+    <meta name="theme-color" content="#f4efe6">
+    <title>Rizal's Footsteps — An archive map</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600;700&family=Playfair+Display:wght@600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+    <link rel="stylesheet" href="style.css?v=20261115">
 </head>
-<body class="m-0 p-0 overflow-hidden">
-    <!-- Welcome Screen -->
-    <div id="welcome-screen" class="fixed inset-0 bg-amber-50 z-[3000] flex items-center justify-center p-4">
-        <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full p-8 text-center transform transition-all border-2 border-amber-200 relative z-10">
-            <div class="mb-6">
-                <div class="w-20 h-20 mx-auto mb-4 bg-amber-100 rounded-full flex items-center justify-center">
-                    <i data-lucide="compass" class="w-10 h-10 text-amber-800"></i>
-                </div>
-                <h1 class="text-3xl font-bold text-amber-900 mb-2">Welcome, Time Traveler!</h1>
-                <p class="text-amber-800 text-lg leading-relaxed">
-                    Are you ready to relive the life of our national hero, Dr. Jose Rizal?
-                </p>
-            </div>
-            <button id="start-journey-btn" class="w-full bg-amber-800 text-white py-4 px-6 rounded-xl font-semibold text-lg hover:bg-amber-900 transition-all shadow-lg hover:shadow-xl transform hover:scale-105 cursor-pointer">
-                Begin Journey
-            </button>
+<body>
+    <div id="welcome-screen" class="welcome-screen">
+        <div class="welcome-card">
+            <div class="welcome-mark" aria-label="Illustrated portrait of José Rizal"><img class="rizal-portrait" src="joserizal.svg?v=20261026" alt="José Rizal portrait illustration" style="width:54px;height:60px;object-fit:contain;transform:translate(2px,1px)"></div>
+            <p class="eyebrow">A living archive</p>
+            <h1>Rizal's<br><em>Footsteps</em></h1>
+            <p class="welcome-copy">Trace the places, people, and moments that shaped the life of the Philippines' national hero.</p>
+            <button id="start-journey-btn" class="button button-dark">Begin the journey <span>→</span></button>
+            <button id="welcome-theme-toggle" class="theme-toggle welcome-theme-toggle" type="button" aria-label="Switch to dark mode" aria-pressed="false"><span aria-hidden="true">☾</span><span class="theme-toggle-label">Dark mode</span></button>
         </div>
     </div>
-
-    <!-- Map Container -->
-    <div id="map" class="w-full h-screen"></div>
-    
-    <!-- In Transit Banner -->
-    <div id="transit-banner" class="fixed top-0 left-0 right-0 bg-gray-500 text-white text-center py-3 px-4 transform -translate-y-full transition-transform duration-500 z-[1500]">
-        <div class="flex items-center justify-center gap-3">
-            <div id="transit-icon" class="w-8 h-8"></div>
-            <span id="transit-message" class="font-semibold text-lg"></span>
-        </div>
-    </div>
-    
-    <!-- Bottom Sheet / Drawer -->
-    <div id="drawer" class="absolute bottom-0 left-0 right-0 sm:absolute sm:right-0 sm:top-0 sm:left-auto sm:h-full sm:w-80 sm:bottom-auto bg-white z-[1000] transition-all duration-300 ease-in-out shadow-2xl">
-        <!-- Mobile Handle -->
-        <div id="drawer-handle" class="sm:hidden w-full flex justify-center py-3 cursor-pointer bg-gray-100 border-b border-gray-200">
-            <div class="w-12 h-1.5 bg-gray-400 rounded-full"></div>
-        </div>
-        
-        <div class="h-full flex flex-col sm:h-full">
-            <!-- Drawer Header -->
-            <div class="p-5 border-b border-gray-300 bg-white flex justify-between items-center">
-                <h2 id="drawer-title" class="text-xl font-bold uppercase tracking-wide text-gray-900"></h2>
-                <div class="flex gap-2">
-                    <button id="toggle-drawer" class="sm:hidden text-gray-600 hover:text-gray-900 transition-transform">
-                        <i data-lucide="chevron-up" class="w-6 h-6"></i>
-                    </button>
-                    <button id="close-drawer" class="text-gray-600 hover:text-gray-900">
-                        <i data-lucide="x" class="w-6 h-6"></i>
-                    </button>
-                </div>
-            </div>
-            
-            <!-- Drawer Content -->
-            <div class="flex-1 overflow-y-auto p-5">
-                <!-- Significant Events -->
-                <div class="mb-6">
-                    <h3 class="font-semibold text-gray-700 mb-3 text-sm uppercase tracking-wide">Significant Events</h3>
-                    <ul id="events-list" class="space-y-2"></ul>
-                </div>
-                
-                <!-- Photo Grid -->
-                <div class="mb-6">
-                    <h3 class="font-semibold text-gray-700 mb-3 text-sm uppercase tracking-wide">Gallery</h3>
-                    <div id="photo-grid" class="space-y-2"></div>
-                </div>
-                
-                <!-- Rating Widget -->
-                <div class="mb-6">
-                    <h3 class="font-semibold text-gray-700 mb-3 text-sm uppercase tracking-wide">How'd you like this place?</h3>
-                    <div id="rating-widget" class="flex gap-1"></div>
-                </div>
-            </div>
-            
-            <!-- Next Stop Button -->
-            <div class="p-5 border-t border-gray-300 bg-white flex-shrink-0">
-                <button id="next-stop-btn" class="w-full bg-gray-500 text-white py-3 px-4 rounded-lg font-semibold hover:bg-gray-600 transition-all flex items-center justify-center gap-2">
-                    <span id="next-stop-text">Next stop -></span>
-                    <i data-lucide="arrow-right" class="w-5 h-5"></i>
-                </button>
-            </div>
-        </div>
-    </div>
-    
-    <!-- Modal Detail Window -->
-    <div id="modal" class="fixed inset-0 bg-black/40 backdrop-blur-sm z-[2000] hidden flex items-center justify-center p-4">
-        <div class="bg-gray-100 rounded-2xl shadow-2xl max-w-lg w-full max-h-[90vh] overflow-hidden transform transition-all">
-            <!-- Modal Header -->
-            <div class="p-5 border-b border-gray-300 bg-gray-100 flex justify-between items-center">
-                <h3 id="modal-title" class="text-xl font-bold uppercase tracking-wide text-gray-900"></h3>
-                <button id="close-modal" class="text-gray-600 hover:text-gray-900">
-                    <i data-lucide="x" class="w-6 h-6"></i>
-                </button>
-            </div>
-            
-            <!-- Modal Content -->
-            <div class="p-5 overflow-y-auto max-h-[60vh]">
-                <p id="modal-description" class="text-gray-800 leading-relaxed mb-6"></p>
-                <div id="modal-images"></div>
-            </div>
-            
-            <!-- Modal Footer -->
-            <div class="p-5 border-t border-gray-300 bg-gray-100 flex justify-end">
-                <button id="modal-nav-btn" class="bg-gray-500 text-white py-2 px-4 rounded-lg font-semibold hover:bg-gray-600 transition-all flex items-center gap-2">
-                    <span id="modal-nav-text">Rizal's Home</span>
-                    <i data-lucide="arrow-right" class="w-5 h-5"></i>
-                </button>
-            </div>
-        </div>
-    </div>
-    
-    <!-- Leaflet JS CDN -->
+    <main class="app-shell">
+        <div id="map" aria-label="Interactive map of Jose Rizal's life"></div>
+        <div class="map-topbar"><div class="brand-lockup"><span class="brand-symbol">✦</span><span>Rizal's Footsteps</span></div><div class="map-caption">1861 — 1896 &nbsp; / &nbsp; AN INTERACTIVE ARCHIVE</div></div>
+        <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Switch to dark mode" aria-pressed="false"><span aria-hidden="true">☾</span><span class="theme-toggle-label">Dark mode</span></button>
+        <button id="journey-feedbacks-toggle" class="journey-feedbacks-toggle" type="button" aria-haspopup="dialog" aria-controls="journey-feedbacks-modal"><span aria-hidden="true">✦</span><span>Journey reflections</span></button>
+        <div id="transit-banner" class="transit-banner" aria-live="polite"><span id="transit-icon"></span><span id="transit-message"></span></div>
+        <aside id="drawer" class="drawer closed" aria-label="Location details">
+            <div class="drawer-handle" id="drawer-handle"><span></span></div>
+            <div class="drawer-header"><div><p class="eyebrow">Current chapter</p><h2 id="drawer-title"></h2></div><button id="close-drawer" class="icon-button" aria-label="Close details">×</button></div>
+            <div class="drawer-body"><section class="drawer-section"><p class="section-label">Significant events</p><ul id="events-list" class="events-list"></ul></section><section class="drawer-section"><p class="section-label">Gallery</p><div id="photo-grid" class="photo-grid"></div></section><section class="rating-section"><p class="section-label">How'd you like this place?</p><div id="rating-widget" class="rating-widget" role="radiogroup" aria-label="Rate this place"></div></section><section class="feedback-section"><p class="section-label">Leave a note</p><form id="stop-feedback-form" class="feedback-form"><input id="stop-feedback-name" maxlength="80" placeholder="Your name (optional)"><textarea id="stop-feedback-comment" maxlength="1000" required placeholder="What stood out to you?"></textarea><button class="button button-outline" type="submit">Post comment <span>→</span></button><p id="stop-feedback-status" class="feedback-status" aria-live="polite"></p></form><div id="stop-comments" class="comments-list"></div></section></div>
+            <div class="drawer-footer"><button id="next-stop-btn" class="button button-dark"><span id="next-stop-text">Next stop</span><span>→</span></button></div>
+        </aside>
+    </main>
+    <div id="modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="modal-title"><article class="modal-card"><header class="modal-header"><div><p class="eyebrow">Archive entry</p><h3 id="modal-title"></h3></div><button id="close-modal" class="icon-button" aria-label="Close archive entry">×</button></header><div class="modal-body"><p id="modal-description" class="modal-description"></p><div id="modal-images" class="modal-images"></div></div><footer class="modal-footer"><button id="modal-nav-btn" class="button button-outline"><span id="modal-nav-text">Back to location</span><span>→</span></button></footer></article></div>
+    <div id="reflection-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="reflection-title"><article class="modal-card"><header class="modal-header"><div><p class="eyebrow" id="reflection-eyebrow">Journey complete</p><h3 id="reflection-title">Leave a reflection</h3></div><button id="close-reflection" class="icon-button" aria-label="Close journey message">×</button></header><div class="modal-body"><div id="journey-feedback-form-wrap"><p class="modal-description">Thank you for walking through Rizal's life with us. Would you like to leave an optional reflection?</p><form id="journey-feedback-form" class="feedback-form"><input id="journey-feedback-name" maxlength="80" placeholder="Your name (optional)"><div><p class="section-label">Rate the journey</p><div id="journey-rating-widget" class="rating-widget" role="radiogroup" aria-label="Rate the journey"></div></div><textarea id="journey-feedback-comment" maxlength="1500" placeholder="Optional: share a reflection..."></textarea><button class="button button-dark" type="submit">Share feedback <span>→</span></button><button id="skip-journey-feedback" class="button button-outline" type="button">Maybe later <span>×</span></button><p id="journey-feedback-status" class="feedback-status" aria-live="polite"></p></form></div><div id="journey-thank-you" class="journey-thank-you hidden"><div class="journey-thank-you-mark" aria-hidden="true">✓</div><p class="eyebrow">Archive visit complete</p><h4>Thank you for walking with Rizal.</h4><p>We hope this journey brought his life, work, and memory a little closer to you.</p><button id="finish-tour-btn" class="button button-dark" type="button">Return to the map <span>→</span></button></div></div></article></div>
+    <div id="journey-feedbacks-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="journey-feedbacks-title"><article class="modal-card journey-feedbacks-card"><header class="modal-header"><div><p class="eyebrow">From fellow visitors</p><h3 id="journey-feedbacks-title">Journey reflections</h3></div><button id="close-journey-feedbacks" class="icon-button" aria-label="Close journey reflections">×</button></header><div class="modal-body"><p class="modal-description">A living stream of notes left by people who followed Rizal's footsteps.</p><div id="journey-feedbacks-list" class="journey-feedbacks-list"><p class="feedback-status">Loading reflections…</p></div><div id="journey-feedbacks-pagination" class="comments-pagination is-hidden"><button type="button" data-page="previous" aria-label="Previous reflections">←</button><span></span><button type="button" data-page="next" aria-label="Next reflections">→</button></div></div></article></div>
+    <style>.feedback-form{display:grid;gap:10px}.feedback-form input,.feedback-form textarea{width:100%;border:1px solid var(--line);border-radius:8px;background:#fff;padding:11px 12px;color:var(--ink);font:13px 'DM Sans',sans-serif}.feedback-form textarea{min-height:86px;resize:vertical;line-height:1.5}.feedback-form input:focus,.feedback-form textarea:focus{outline:2px solid rgba(201,104,69,.25);border-color:var(--accent)}.feedback-section{padding-top:4px}.feedback-status{color:var(--muted);font-size:11px;line-height:1.4;margin:0}.comments-list{display:grid;gap:8px;margin-top:14px}.comment-card{padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:#fff}.comment-card div{display:flex;justify-content:space-between;gap:8px;font-size:11px}.comment-card div span{color:var(--accent);letter-spacing:1px}.comment-card p{margin:6px 0 0;color:var(--muted);font-size:12px;line-height:1.45}</style>
+    <style>.comments-pagination{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:12px}.comments-pagination span{font:10px 'DM Mono',monospace;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}.comments-pagination button{border:1px solid var(--line);border-radius:6px;background:var(--paper-light);color:var(--ink);width:28px;height:28px;font-size:13px}.comments-pagination button:disabled{opacity:.35;cursor:default}.comments-pagination.is-hidden{display:none}</style>
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    
-    <!-- Data -->
-    <script src="data.js"></script>
-    
-    <!-- Main App -->
-    <script src="app.js"></script>
+    <link rel="stylesheet" href="vendor/maptiler-sdk.css?v=2.4.0">
+    <script src="vendor/maptiler-sdk.umd.min.js?v=2.4.0"></script>
+    <script src="vendor/leaflet-maptilersdk.js?v=2.4.0"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="data.js?v=20261025"></script><script src="app.js?v=20261116"></script>
 </body>
 </html>

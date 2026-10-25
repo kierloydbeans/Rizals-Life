@@ -1,582 +1,185 @@
-// Initialize Lucide icons
-lucide.createIcons();
+/* Rizal Footsteps — intentionally dependency-light map controller. */
+let MAPTILER_API_KEY = window.MAPTILER_API_KEY || 'i_will_input_my_api_key_myself';
+let SUPABASE_URL = window.SUPABASE_URL || '';
+let SUPABASE_ANON_KEY = window.SUPABASE_ANON_KEY || '';
+let map, markers = [], route, movingMarker, maptilerLayer, currentLocationId;
+let commentsPage = 0;
+const COMMENTS_PAGE_SIZE = 3;
+let journeyFeedbackPage = 0;
+const JOURNEY_FEEDBACK_PAGE_SIZE = 5;
+let ratings = JSON.parse(localStorage.getItem('rizalLocationRatings') || '{}');
+let theme = localStorage.getItem('rizalTheme') || 'light';
 
-// Global state
-let map;
-let markers = [];
-let polyline;
-let currentLocationId = null;
-let ratings = JSON.parse(localStorage.getItem('rizalLocationRatings')) || {};
-let movingMarker = null;
-let isDrawerExpanded = false;
-
-// Initialize the application
-document.addEventListener('DOMContentLoaded', () => {
-    // Check if user has seen welcome screen
-    const hasSeenWelcome = localStorage.getItem('rizalWelcomeSeen');
-    
-    if (hasSeenWelcome) {
-        document.getElementById('welcome-screen').classList.add('hidden');
-        initApp();
-    } else {
-        // Show welcome screen
-        showWelcomeScreen();
+async function loadMapTilerKey() {
+    if (window.MAPTILER_API_KEY) return;
+    try {
+        const response = await fetch('.env', { cache: 'no-store' });
+        if (!response.ok) return;
+        const envText = await response.text();
+        const match = envText.match(/^MAPTILER_API_KEY=(.+)$/m);
+        if (match && match[1].trim() && !match[1].includes('i_will_input_my_api_key_myself')) {
+            MAPTILER_API_KEY = match[1].trim();
+        }
+        const supabaseUrl = envText.match(/^SUPABASE_URL=(.+)$/m);
+        const supabaseKey = envText.match(/^SUPABASE_ANON_KEY=(.+)$/m);
+        if (!SUPABASE_URL && supabaseUrl) SUPABASE_URL = supabaseUrl[1].trim();
+        if (!SUPABASE_ANON_KEY && supabaseKey) SUPABASE_ANON_KEY = supabaseKey[1].trim();
+    } catch (error) {
+        console.warn('MapTiler key could not be loaded from .env; use a local server or window.MAPTILER_API_KEY.', error);
     }
+}
+
+document.addEventListener('DOMContentLoaded', async () => {
+    await loadMapTilerKey();
+    applyTheme();
+    document.getElementById('welcome-theme-toggle').addEventListener('click', toggleTheme);
+    const welcome = document.getElementById('welcome-screen');
+    const start = () => { welcome.classList.add('is-hidden'); setTimeout(initApp, 350); };
+    document.getElementById('start-journey-btn').addEventListener('click', start);
 });
 
-// Show welcome screen
-function showWelcomeScreen() {
-    const welcomeScreen = document.getElementById('welcome-screen');
-    const startBtn = document.getElementById('start-journey-btn');
-    
-    if (!startBtn) {
-        console.error('Start button not found');
-        return;
-    }
-    
-    startBtn.addEventListener('click', () => {
-        console.log('Start button clicked');
-        welcomeScreen.classList.add('hidden');
-        localStorage.setItem('rizalWelcomeSeen', 'true');
-        
-        // Initialize app after welcome screen animation
-        setTimeout(() => {
-            initApp();
-        }, 500);
-    });
-    
-    lucide.createIcons();
-}
-
-// Initialize the main app
 function initApp() {
-    initMap();
-    createMarkersAndPolyline();
-    setupEventListeners();
-    
-    // Invalidate map size to ensure it renders correctly
-    setTimeout(() => {
-        map.invalidateSize();
-    }, 100);
-    
-    // Start at the first location
-    if (rizalData.length > 0) {
-        selectLocation(rizalData[0].id);
-    }
-}
-
-// Initialize Leaflet map
-function initMap() {
-    map = L.map('map', {
-        zoomControl: false
-    }).setView([14.2117, 121.1653], 8);
-    
-    // Add zoom control to top-right
-    L.control.zoom({
-        position: 'topright'
-    }).addTo(map);
-    
-    // Add Wikimedia tiles (free, no API key required)
-    L.tileLayer('https://maps.wikimedia.org/osm-intl/{z}/{x}/{y}.png', {
-        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors | <a href="https://wikimediafoundation.org/wiki/Maps_Terms_of_Use">Wikimedia</a>',
-        maxZoom: 19
-    }).addTo(map);
-    
-    // Handle map resize
-    window.addEventListener('resize', () => {
-        map.invalidateSize();
-    });
-}
-
-// Create markers and connect them with polyline
-function createMarkersAndPolyline() {
-    const coordinates = rizalData.map(location => location.coordinates);
-    
-    // Create polyline connecting all locations
-    polyline = L.polyline(coordinates, {
-        color: '#453925',
-        weight: 3,
-        opacity: 0.7,
-        dashArray: '10, 10'
-    }).addTo(map);
-    
-    // Create markers for each location
+    registerOfflineCache();
+    applyTheme();
+    map = L.map('map', { zoomControl: false, minZoom: 2 }).setView(rizalData[0].coordinates, 12);
+    L.control.zoom({ position: 'bottomleft' }).addTo(map);
+    maptilerLayer = new L.MaptilerLayer({ apiKey: MAPTILER_API_KEY, style: mapStyleId() }).addTo(map);
+    const coords = rizalData.map(item => item.coordinates);
+    route = L.polyline(coords, { color: routeColor(), weight: 2.5, opacity: .88, lineCap: 'round', lineJoin: 'round' }).addTo(map);
     rizalData.forEach(location => {
-        const marker = L.marker(location.coordinates, {
-            title: location.location_name
-        }).addTo(map);
-        
-        // Add popup
-        marker.bindPopup(`<b>${location.location_name}</b><br>Click to explore`);
-        
-        // Add click event
-        marker.on('click', () => {
-            handleMarkerClick(location);
-        });
-        
-        markers.push({
-            marker,
-            location
-        });
+        const icon = L.divIcon({ className: 'archive-marker', html: `<span class="marker-dot"></span><span class="marker-label">${location.location_name}</span>`, iconSize: [1, 1], iconAnchor: [6, 6] });
+        const marker = L.marker(location.coordinates, { icon, title: location.location_name, keyboard: true }).addTo(map);
+        marker.on('click', () => chooseLocation(location));
+        markers.push({ marker, location });
     });
+    bindEvents();
+    setTimeout(() => map.invalidateSize(), 100);
+    chooseLocation(rizalData[0], false);
+    prefetchRouteVectorTiles();
 }
 
-// Handle marker click
-function handleMarkerClick(location) {
-    const prevLocation = rizalData.find(l => l.id === currentLocationId);
-    
-    // Check transit type and animate moving marker
-    if (prevLocation) {
-        animateMovingMarker(prevLocation.coordinates, location.coordinates, location.transit);
-        // showTransitBanner(location.transit, location.location_name);
-    } else {
-        // First location, just fly to it
-        map.flyTo(location.coordinates, 10, {
-            duration: 1.5
-        });
-        selectLocation(location.id);
-        return;
-    }
-    
-    // Select location after animation
-    setTimeout(() => {
-        selectLocation(location.id);
-        // Remove moving marker after reaching destination
-        if (movingMarker) {
-            map.removeLayer(movingMarker);
-            movingMarker = null;
-        }
-    }, 2500);
+function registerOfflineCache() {
+    if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js?v=20261101').catch(error => console.warn('Offline cache unavailable:', error));
 }
 
-// Animate moving marker along path
-function animateMovingMarker(startCoords, endCoords, transitType) {
-    // Remove existing moving marker if any
-    if (movingMarker) {
-        map.removeLayer(movingMarker);
-    }
-    
-    // Create custom icon based on transit type
-    let iconSvg = '';
-    if (transitType === 'overseas' || transitType === 'sea') {
-        // 18th century ship icon
-        iconSvg = `
-            <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M6 42 L58 42 L54 34 L10 34 Z" fill="#8B4513"/>
-                <path d="M10 34 L54 34 L50 26 L14 26 Z" fill="#A0522D"/>
-                <rect x="28" y="22" width="2" height="12" fill="#654321"/>
-                <rect x="34" y="22" width="2" height="12" fill="#654321"/>
-                <path d="M29 22 L29 8 L35 8 L35 22" fill="#D2691E"/>
-                <circle cx="12" cy="46" r="4" fill="#654321"/>
-                <circle cx="52" cy="46" r="4" fill="#654321"/>
-                <path d="M32 8 L32 4" stroke="#654321" stroke-width="2"/>
-                <path d="M26 10 L38 10" stroke="#D2691E" stroke-width="2"/>
-                <path d="M24 14 L40 14" stroke="#D2691E" stroke-width="2"/>
-            </svg>
-        `;
-    } else {
-        // Horse carriage icon (local transport)
-        iconSvg = `
-            <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <ellipse cx="14" cy="38" rx="8" ry="5" fill="#D2691E"/>
-                <path d="M8 36 L8 44" stroke="#654321" stroke-width="2"/>
-                <path d="M20 36 L20 44" stroke="#654321" stroke-width="2"/>
-                <circle cx="6" cy="32" r="4" fill="#D2691E"/>
-                <path d="M2 30 L6 32 L6 34" stroke="#654321" stroke-width="2" fill="none"/>
-                <path d="M10 42 L10 50" stroke="#654321" stroke-width="2"/>
-                <path d="M18 42 L18 50" stroke="#654321" stroke-width="2"/>
-                <rect x="26" y="28" width="24" height="14" rx="2" fill="#8B4513"/>
-                <path d="M26 28 L26 22 L50 22 L50 28" fill="#A0522D"/>
-                <circle cx="32" cy="46" r="4" fill="#654321"/>
-                <circle cx="44" cy="46" r="4" fill="#654321"/>
-                <path d="M32 42 L32 50" stroke="#8B4513" stroke-width="1"/>
-                <path d="M28 46 L36 46" stroke="#8B4513" stroke-width="1"/>
-                <path d="M44 42 L44 50" stroke="#8B4513" stroke-width="1"/>
-                <path d="M40 46 L48 46" stroke="#8B4513" stroke-width="1"/>
-                <path d="M22 38 L26 35" stroke="#654321" stroke-width="2"/>
-            </svg>
-        `;
-    }
-    
-    // Create custom DivIcon
-    const customIcon = L.divIcon({
-        className: 'moving-marker-icon',
-        html: `<div style="width: 40px; height: 40px;">${iconSvg}</div>`,
-        iconSize: [40, 40],
-        iconAnchor: [20, 20]
-    });
-    
-    // Create marker at start position
-    movingMarker = L.marker(startCoords, { icon: customIcon }).addTo(map);
-    
-    // Animate along the path
-    const duration = 2500; // 2.5 seconds
-    const startTime = performance.now();
-    let lastCameraUpdate = 0;
-    
-    function animate(currentTime) {
-        const elapsed = currentTime - startTime;
-        const progress = Math.min(elapsed / duration, 1);
-        
-        // Interpolate between start and end coordinates
-        const lat = startCoords[0] + (endCoords[0] - startCoords[0]) * progress;
-        const lng = startCoords[1] + (endCoords[1] - startCoords[1]) * progress;
-        
-        movingMarker.setLatLng([lat, lng]);
-        
-        // Make camera follow the moving marker with throttling
-        // Only update camera every 100ms to avoid too many tile requests
-        if (currentTime - lastCameraUpdate > 100) {
-            map.panTo([lat, lng], {
-                animate: false
-            });
-            lastCameraUpdate = currentTime;
-        }
-        
-        if (progress < 1) {
-            requestAnimationFrame(animate);
-        }
-    }
-    
-    requestAnimationFrame(animate);
+function tilePoint(lat, lng, zoom) {
+    const scale = 2 ** zoom;
+    return { x: Math.floor(((lng + 180) / 360) * scale), y: Math.floor((1 - Math.asinh(Math.tan(lat * Math.PI / 180)) / Math.PI) / 2 * scale) };
 }
 
-// Show transit banner
-function showTransitBanner(transitType, destination) {
-    const banner = document.getElementById('transit-banner');
-    const message = document.getElementById('transit-message');
-    const transitIcon = document.getElementById('transit-icon');
-    
-    let iconSvg = '';
-    let text = 'journey';
-    
-    if (transitType === 'overseas' || transitType === 'sea') {
-        // 18th century ship icon
-        iconSvg = `
-            <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M6 42 L58 42 L54 34 L10 34 Z" fill="#8B4513"/>
-                <path d="M10 34 L54 34 L50 26 L14 26 Z" fill="#A0522D"/>
-                <rect x="28" y="22" width="2" height="12" fill="#654321"/>
-                <rect x="34" y="22" width="2" height="12" fill="#654321"/>
-                <path d="M29 22 L29 8 L35 8 L35 22" fill="#D2691E"/>
-                <circle cx="12" cy="46" r="4" fill="#654321"/>
-                <circle cx="52" cy="46" r="4" fill="#654321"/>
-                <path d="M32 8 L32 4" stroke="#654321" stroke-width="2"/>
-                <path d="M26 10 L38 10" stroke="#D2691E" stroke-width="2"/>
-                <path d="M24 14 L40 14" stroke="#D2691E" stroke-width="2"/>
-            </svg>
-        `;
-        text = 'Overseas journey';
-    } else {
-        // Horse carriage icon (local transport) - better design
-        iconSvg = `
-            <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <!-- Horse body -->
-                <ellipse cx="14" cy="38" rx="8" ry="5" fill="#D2691E"/>
-                <path d="M8 36 L8 44" stroke="#654321" stroke-width="2"/>
-                <path d="M20 36 L20 44" stroke="#654321" stroke-width="2"/>
-                <!-- Horse head -->
-                <circle cx="6" cy="32" r="4" fill="#D2691E"/>
-                <path d="M2 30 L6 32 L6 34" stroke="#654321" stroke-width="2" fill="none"/>
-                <!-- Horse legs -->
-                <path d="M10 42 L10 50" stroke="#654321" stroke-width="2"/>
-                <path d="M18 42 L18 50" stroke="#654321" stroke-width="2"/>
-                <!-- Carriage body -->
-                <rect x="26" y="28" width="24" height="14" rx="2" fill="#8B4513"/>
-                <!-- Carriage canopy -->
-                <path d="M26 28 L26 22 L50 22 L50 28" fill="#A0522D"/>
-                <!-- Carriage wheels -->
-                <circle cx="32" cy="46" r="4" fill="#654321"/>
-                <circle cx="44" cy="46" r="4" fill="#654321"/>
-                <!-- Wheel spokes -->
-                <path d="M32 42 L32 50" stroke="#8B4513" stroke-width="1"/>
-                <path d="M28 46 L36 46" stroke="#8B4513" stroke-width="1"/>
-                <path d="M44 42 L44 50" stroke="#8B4513" stroke-width="1"/>
-                <path d="M40 46 L48 46" stroke="#8B4513" stroke-width="1"/>
-                <!-- Connection -->
-                <path d="M22 38 L26 35" stroke="#654321" stroke-width="2"/>
-            </svg>
-        `;
-        text = 'Local journey';
-    }
-    
-    transitIcon.innerHTML = iconSvg;
-    message.textContent = `${text} to ${destination}...`;
-    banner.classList.add('show');
-    
-    // Hide banner after 3 seconds
-    setTimeout(() => {
-        banner.classList.remove('show');
-    }, 3000);
+function mapStyleId() { return theme === 'dark' ? 'dataviz-dark' : 'dataviz-light'; }
+function routeColor() { return theme === 'dark' ? '#f3eee5' : '#27231f'; }
+
+function toggleTheme() { theme = theme === 'light' ? 'dark' : 'light'; localStorage.setItem('rizalTheme', theme); const mapContainer = document.getElementById('map'); mapContainer?.classList.add('theme-switching'); applyTheme(); if (route) route.setStyle({ color: routeColor(), opacity: theme === 'dark' ? .92 : .82 }); if (maptilerLayer) maptilerLayer.setStyle(mapStyleId()); window.setTimeout(() => mapContainer?.classList.remove('theme-switching'), 360); }
+
+async function prefetchRouteVectorTiles() {
+    if (!MAPTILER_API_KEY || MAPTILER_API_KEY.includes('i_will_input')) return;
+    try {
+        const response = await fetch(`https://api.maptiler.com/maps/${mapStyleId()}/style.json?key=${MAPTILER_API_KEY}`);
+        if (!response.ok) return;
+        const style = await response.json();
+        const tileJsons = await Promise.all(Object.values(style.sources || {}).map(async source => {
+            if (source.tiles) return source;
+            if (!source.url) return null;
+            const sourceResponse = await fetch(`${source.url}${source.url.includes('?') ? '&' : '?'}key=${MAPTILER_API_KEY}`);
+            return sourceResponse.ok ? sourceResponse.json() : null;
+        }));
+        const urls = new Set();
+        tileJsons.filter(Boolean).forEach(source => (source.tiles || []).forEach(template => {
+            [4, 5].forEach(zoom => rizalData.forEach(location => {
+                const center = tilePoint(location.coordinates[0], location.coordinates[1], zoom);
+                urls.add(template.replace('{z}', zoom).replace('{x}', center.x).replace('{y}', center.y));
+            }));
+        }));
+        urls.forEach(url => fetch(`${url}${url.includes('?') ? '&' : '?'}key=${MAPTILER_API_KEY}`, { mode: 'cors' }).catch(() => {}));
+    } catch (error) { console.warn('Vector tile prefetch unavailable:', error); }
 }
 
-// Select a location and update drawer
-function selectLocation(locationId) {
-    currentLocationId = locationId;
-    const location = rizalData.find(l => l.id === locationId);
-    
-    if (!location) return;
-    
-    // Update drawer content
-    updateDrawer(location);
-    
-    // Open drawer
-    openDrawer();
-    
-    // Highlight current marker
-    markers.forEach(({ marker, location: loc }) => {
-        if (loc.id === locationId) {
-            marker.openPopup();
-        }
-    });
+function chooseLocation(location, animate = true) {
+    const previous = rizalData.find(item => item.id === currentLocationId);
+    if (previous && previous.id !== location.id) animateJourney(previous, location);
+    currentLocationId = location.id;
+    if (animate) map.flyTo(location.coordinates, 12, { duration: 1.1 });
+    updateDrawer(location); openDrawer();
 }
 
-// Update drawer content
+function animateJourney(from, to) {
+    if (movingMarker) map.removeLayer(movingMarker);
+    const icon = L.divIcon({ className: 'journey-marker', html: '<span class="kalesa-icon" aria-label="horse-drawn carriage">♞</span>', iconSize: [42, 42], iconAnchor: [21, 21] });
+    movingMarker = L.marker(from.coordinates, { icon, zIndexOffset: 1000 }).addTo(map);
+    const started = performance.now(), duration = 1800;
+    const frame = now => { if (!movingMarker) return; const p = Math.min((now - started) / duration, 1); movingMarker.setLatLng([from.coordinates[0] + (to.coordinates[0] - from.coordinates[0]) * p, from.coordinates[1] + (to.coordinates[1] - from.coordinates[1]) * p]); if (p < 1) requestAnimationFrame(frame); else { map.removeLayer(movingMarker); movingMarker = null; } };
+    requestAnimationFrame(frame);
+}
+
 function updateDrawer(location) {
-    document.getElementById('drawer-title').textContent = location.location_name;
-    
-    // Update events list
-    const eventsList = document.getElementById('events-list');
-    eventsList.innerHTML = '';
-    
-    location.significant_events.forEach(event => {
-        const li = document.createElement('li');
-        li.className = 'event-item';
-        li.innerHTML = `
-            <span class="font-medium text-gray-800">${event.title}</span>
-        `;
-        li.addEventListener('click', () => openModal(event, location));
-        eventsList.appendChild(li);
-    });
-    
-    // Update photo grid
-    const photoGrid = document.getElementById('photo-grid');
-    photoGrid.innerHTML = '';
-    
-    location.images.slice(0, 3).forEach((imageUrl, index) => {
-        const img = document.createElement('img');
-        img.src = imageUrl;
-        img.alt = `${location.location_name} photo ${index + 1}`;
-        img.className = 'photo-item w-full h-32 object-cover rounded-lg cursor-pointer';
-        img.addEventListener('click', () => {
-            // Show full image in modal
-            openModal({
-                title: location.location_name,
-                description: location.description,
-                images: [imageUrl]
-            }, location);
-        });
-        photoGrid.appendChild(img);
-    });
-    
-    // Update rating widget
-    updateRatingWidget(location.id);
-    
-    // Update next stop button
-    const nextStopBtn = document.getElementById('next-stop-btn');
-    const nextStopText = document.getElementById('next-stop-text');
-    
-    if (location.next_stop_id) {
-        const nextLocation = rizalData.find(l => l.id === location.next_stop_id);
-        nextStopText.textContent = `Next stop: ${nextLocation.location_name} ->`;
-        nextStopBtn.classList.remove('hidden');
-    } else {
-        nextStopBtn.classList.add('hidden');
-    }
-    
-    // Re-initialize Lucide icons
-    lucide.createIcons();
+    document.getElementById('drawer-title').textContent = location.location_name.replace('BiÃ±an', 'Biñan');
+    const events = document.getElementById('events-list'); events.innerHTML = '';
+    location.significant_events.forEach(event => { const item = document.createElement('li'); item.className = 'event-item'; item.innerHTML = `<span>${event.title}</span><b>↗</b>`; item.addEventListener('click', () => openModal(event)); events.appendChild(item); });
+    const gallery = document.getElementById('photo-grid'); gallery.innerHTML = '';
+    (location.images || []).slice(0, 4).forEach((src, i) => { const img = document.createElement('img'); img.src = src; img.alt = `${location.location_name} archive image ${i + 1}`; img.loading = 'lazy'; img.onerror = () => { img.style.visibility = 'hidden'; }; gallery.appendChild(img); });
+    renderRating(location.id);
+    commentsPage = 0;
+    ensureCommentsPagination();
+    loadStopFeedback(location.id);
+    const next = rizalData.find(item => item.id === location.next_stop_id); document.getElementById('next-stop-text').textContent = next ? `Next: ${next.location_name}` : 'Journey complete'; document.getElementById('next-stop-btn').disabled = false;
 }
 
-// Update rating widget
-function updateRatingWidget(locationId) {
-    const ratingWidget = document.getElementById('rating-widget');
-    ratingWidget.innerHTML = '';
-    
-    const currentRating = ratings[locationId] || 0;
-    
-    for (let i = 1; i <= 5; i++) {
-        const star = document.createElement('button');
-        star.className = `star-rating ${i <= currentRating ? 'active' : 'inactive'}`;
-        star.innerHTML = '<i data-lucide="star"></i>';
-        star.addEventListener('click', () => setRating(locationId, i));
-        star.addEventListener('mouseenter', () => {
-            // Hover effect
-            for (let j = 1; j <= 5; j++) {
-                const stars = ratingWidget.children;
-                if (j <= i) {
-                    stars[j - 1].classList.add('active');
-                    stars[j - 1].classList.remove('inactive');
-                } else {
-                    stars[j - 1].classList.remove('active');
-                    stars[j - 1].classList.add('inactive');
-                }
-            }
-        });
-        star.addEventListener('mouseleave', () => {
-            // Reset to saved rating
-            updateRatingWidget(locationId);
-        });
-        ratingWidget.appendChild(star);
-    }
-    
-    lucide.createIcons();
+function renderRating(locationId) { const widget = document.getElementById('rating-widget'); widget.innerHTML = ''; const saved = ratings[locationId] || 0; for (let i = 1; i <= 5; i++) { const star = document.createElement('button'); star.type = 'button'; star.className = `star ${i <= saved ? 'is-selected' : ''}`; star.textContent = '★'; star.setAttribute('aria-label', `${i} stars`); star.setAttribute('aria-checked', i === saved); star.addEventListener('click', () => { ratings[locationId] = i; localStorage.setItem('rizalLocationRatings', JSON.stringify(ratings)); renderRating(locationId); }); widget.appendChild(star); } }
+
+async function supabaseRequest(path, options = {}, withMeta = false) {
+    if (!SUPABASE_URL || !SUPABASE_ANON_KEY || SUPABASE_URL.includes('your-project')) return null;
+    const baseUrl = SUPABASE_URL.replace(/\/+$/, '').replace(/\/rest(?:\/v1)?$/, '');
+    const response = await fetch(`${baseUrl}/rest/v1/${path}`, { ...options, headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}`, 'Content-Type': 'application/json', ...(options.headers || {}) } });
+    if (!response.ok) throw new Error(`Supabase request failed (${response.status})`);
+    const body = await response.text();
+    const data = body ? JSON.parse(body) : null;
+    if (!withMeta) return data;
+    const contentRange = response.headers.get('content-range') || '';
+    const total = Number(contentRange.split('/')[1]) || (Array.isArray(data) ? data.length : 0);
+    return { data: data || [], total };
 }
 
-// Set rating for a location
-function setRating(locationId, rating) {
-    ratings[locationId] = rating;
-    localStorage.setItem('rizalLocationRatings', JSON.stringify(ratings));
-    updateRatingWidget(locationId);
+function renderJourneyFeedbacks(feedbacks) { const list = document.getElementById('journey-feedbacks-list'); list.replaceChildren(); if (!feedbacks.length) { list.innerHTML = '<p class="feedback-status">No journey reflections yet. Be the first to share one.</p>'; return; } feedbacks.forEach(feedback => { const card = document.createElement('article'); card.className = 'journey-feedback-card'; const header = document.createElement('div'); const name = document.createElement('strong'); name.textContent = feedback.display_name || 'Anonymous'; const rating = document.createElement('span'); rating.textContent = feedback.rating ? `${'★'.repeat(feedback.rating)}${'☆'.repeat(5 - feedback.rating)}` : 'Journey note'; header.append(name, rating); const comment = document.createElement('p'); comment.textContent = feedback.comment; const date = document.createElement('small'); date.textContent = feedback.created_at ? new Date(feedback.created_at).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) : ''; card.append(header, comment, date); list.appendChild(card); }); }
+function renderJourneyFeedbackPagination(total) { const pagination = document.getElementById('journey-feedbacks-pagination'); const pages = Math.max(1, Math.ceil(total / JOURNEY_FEEDBACK_PAGE_SIZE)); pagination.classList.toggle('is-hidden', pages <= 1); pagination.querySelector('span').textContent = `Page ${Math.min(journeyFeedbackPage + 1, pages)} of ${pages}`; pagination.querySelector('[data-page="previous"]').disabled = journeyFeedbackPage <= 0; pagination.querySelector('[data-page="next"]').disabled = journeyFeedbackPage >= pages - 1; }
+async function loadJourneyFeedbacks() { const list = document.getElementById('journey-feedbacks-list'); list.innerHTML = '<p class="feedback-status">Loading reflections…</p>'; try { const from = journeyFeedbackPage * JOURNEY_FEEDBACK_PAGE_SIZE; const result = await supabaseRequest(`journey_feedback?select=display_name,rating,comment,created_at&order=created_at.desc&limit=${JOURNEY_FEEDBACK_PAGE_SIZE}&offset=${from}`, { headers: { Prefer: 'count=exact' } }, true); renderJourneyFeedbacks(result.data); renderJourneyFeedbackPagination(result.total); } catch (error) { list.innerHTML = '<p class="feedback-status">Reflections are unavailable right now.</p>'; document.getElementById('journey-feedbacks-pagination').classList.add('is-hidden'); console.warn(error); } }
+async function loadStopFeedback(stopId) {
+    const list = document.getElementById('stop-comments'); list.innerHTML = '<p class="feedback-status">Loading notes…</p>';
+    try { const from = commentsPage * COMMENTS_PAGE_SIZE; const result = await supabaseRequest(`stop_feedback?stop_id=eq.${stopId}&select=display_name,rating,comment,created_at&order=created_at.desc&limit=${COMMENTS_PAGE_SIZE}&offset=${from}`, { headers: { Prefer: 'count=exact' } }, true); renderComments(list, result.data); renderCommentsPagination(result.total); } catch (error) { list.innerHTML = '<p class="feedback-status">Comments are unavailable right now.</p>'; console.warn(error); }
 }
 
-// Open drawer
-function openDrawer() {
-    const drawer = document.getElementById('drawer');
-    const toggleBtn = document.getElementById('toggle-drawer');
-    drawer.classList.remove('translate-x-full', 'closed');
-    drawer.classList.add('open');
-    isDrawerExpanded = false;
-    drawer.classList.remove('expanded');
-    drawer.classList.add('collapsed');
-    toggleBtn.innerHTML = '<i data-lucide="chevron-up" class="w-6 h-6"></i>';
-    lucide.createIcons();
+function renderComments(list, rows) { list.innerHTML = rows.length ? rows.map(row => `<article class="comment-card"><div><strong>${escapeHtml(row.display_name)}</strong><span>${'★'.repeat(row.rating)}</span></div><p>${escapeHtml(row.comment)}</p></article>`).join('') : '<p class="feedback-status">Be the first to leave a note.</p>'; }
+function ensureCommentsPagination() { if (document.getElementById('comments-pagination')) return; const pagination = document.createElement('div'); pagination.id = 'comments-pagination'; pagination.className = 'comments-pagination'; pagination.innerHTML = '<button type="button" data-page="previous" aria-label="Previous comments">←</button><span></span><button type="button" data-page="next" aria-label="Next comments">→</button>'; document.getElementById('stop-comments').after(pagination); pagination.querySelector('[data-page="previous"]').addEventListener('click', () => { if (commentsPage > 0) { commentsPage--; loadStopFeedback(currentLocationId); } }); pagination.querySelector('[data-page="next"]').addEventListener('click', () => { commentsPage++; loadStopFeedback(currentLocationId); }); }
+function renderCommentsPagination(total) { const pagination = document.getElementById('comments-pagination'); if (!pagination) return; const pages = Math.max(1, Math.ceil(total / COMMENTS_PAGE_SIZE)); pagination.classList.toggle('is-hidden', pages <= 1); pagination.querySelector('span').textContent = `Page ${Math.min(commentsPage + 1, pages)} of ${pages}`; pagination.querySelector('[data-page="previous"]').disabled = commentsPage <= 0; pagination.querySelector('[data-page="next"]').disabled = commentsPage >= pages - 1; }
+function escapeHtml(value) { return String(value).replace(/[&<>'"]/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[character])); }
+function renderJourneyRating() { const widget = document.getElementById('journey-rating-widget'); widget.innerHTML = ''; for (let i = 1; i <= 5; i++) { const star = document.createElement('button'); star.type = 'button'; star.className = `star ${i <= (window.journeyRating || 0) ? 'is-selected' : ''}`; star.textContent = '★'; star.setAttribute('aria-label', `${i} stars`); star.addEventListener('click', () => { window.journeyRating = i; renderJourneyRating(); }); widget.appendChild(star); } }
+async function submitStopFeedback(event) { event.preventDefault(); const status = document.getElementById('stop-feedback-status'); const comment = document.getElementById('stop-feedback-comment').value.trim(); const rating = ratings[currentLocationId] || 0; if (!comment) return; if (!rating) { status.textContent = 'Choose a star rating first.'; return; } status.textContent = 'Posting…'; try { await supabaseRequest('stop_feedback', { method: 'POST', headers: { Prefer: 'return=minimal' }, body: JSON.stringify({ stop_id: currentLocationId, rating, comment, display_name: document.getElementById('stop-feedback-name').value.trim() || 'Anonymous' }) }); event.target.reset(); status.textContent = 'Thanks for sharing.'; loadStopFeedback(currentLocationId); } catch (error) { status.textContent = 'Could not post yet. Check your Supabase configuration.'; console.warn(error); } }
+function resetJourneyFeedbackModal() { document.getElementById('journey-feedback-form-wrap').classList.remove('hidden'); document.getElementById('journey-thank-you').classList.add('hidden'); document.getElementById('reflection-eyebrow').textContent = 'Journey complete'; document.getElementById('reflection-title').textContent = 'Leave a reflection'; }
+function showJourneyThankYou() { document.getElementById('journey-feedback-form-wrap').classList.add('hidden'); document.getElementById('journey-thank-you').classList.remove('hidden'); document.getElementById('reflection-eyebrow').textContent = 'Thank you for visiting'; document.getElementById('reflection-title').textContent = 'Tour complete'; }
+async function submitJourneyFeedback(event) { event.preventDefault(); const status = document.getElementById('journey-feedback-status'); const comment = document.getElementById('journey-feedback-comment').value.trim(); if (!comment) { showJourneyThankYou(); return; } status.textContent = 'Posting…'; try { await supabaseRequest('journey_feedback', { method: 'POST', headers: { Prefer: 'return=minimal' }, body: JSON.stringify({ rating: window.journeyRating || null, comment, display_name: document.getElementById('journey-feedback-name').value.trim() || 'Anonymous' }) }); event.target.reset(); showJourneyThankYou(); } catch (error) { status.textContent = 'Could not post yet. Check your Supabase configuration.'; console.warn(error); } }
+function openDrawer() { document.getElementById('drawer').classList.remove('closed'); document.getElementById('drawer').classList.add('open'); }
+function closeDrawer() { document.getElementById('drawer').classList.remove('open'); document.getElementById('drawer').classList.add('closed'); }
+function openModal(event) { document.getElementById('modal-title').textContent = event.title; document.getElementById('modal-description').textContent = event.description; const images = document.getElementById('modal-images'); images.innerHTML = ''; (event.images || []).slice(0, 2).forEach((src, i) => { const img = document.createElement('img'); img.src = src; img.alt = `${event.title} image ${i + 1}`; img.onerror = () => img.remove(); images.appendChild(img); }); document.getElementById('modal').classList.remove('hidden'); }
+function closeModal() { document.getElementById('modal').classList.add('hidden'); }
+function bindEvents() {
+    document.getElementById('close-drawer').addEventListener('click', closeDrawer); document.getElementById('close-modal').addEventListener('click', closeModal);
+    document.getElementById('theme-toggle').addEventListener('click', toggleTheme);
+    document.getElementById('journey-feedbacks-toggle').addEventListener('click', () => { journeyFeedbackPage = 0; document.getElementById('journey-feedbacks-modal').classList.remove('hidden'); loadJourneyFeedbacks(); });
+    document.getElementById('close-journey-feedbacks').addEventListener('click', () => document.getElementById('journey-feedbacks-modal').classList.add('hidden'));
+    document.querySelector('#journey-feedbacks-pagination [data-page="previous"]').addEventListener('click', () => { if (journeyFeedbackPage > 0) { journeyFeedbackPage--; loadJourneyFeedbacks(); } });
+    document.querySelector('#journey-feedbacks-pagination [data-page="next"]').addEventListener('click', () => { journeyFeedbackPage++; loadJourneyFeedbacks(); });
+    document.getElementById('modal').addEventListener('click', e => { if (e.target.id === 'modal') closeModal(); }); document.getElementById('modal-nav-btn').addEventListener('click', closeModal);
+    document.getElementById('stop-feedback-form').addEventListener('submit', submitStopFeedback); document.getElementById('journey-feedback-form').addEventListener('submit', submitJourneyFeedback); renderJourneyRating();
+    document.getElementById('close-reflection').addEventListener('click', () => document.getElementById('reflection-modal').classList.add('hidden')); document.getElementById('skip-journey-feedback').addEventListener('click', showJourneyThankYou); document.getElementById('finish-tour-btn').addEventListener('click', () => document.getElementById('reflection-modal').classList.add('hidden'));
+    document.getElementById('next-stop-btn').addEventListener('click', () => { const here = rizalData.find(item => item.id === currentLocationId); const next = rizalData.find(item => item.id === here?.next_stop_id); if (next) chooseLocation(next); else { resetJourneyFeedbackModal(); renderJourneyRating(); document.getElementById('reflection-modal').classList.remove('hidden'); } });
+    document.getElementById('drawer-handle').addEventListener('click', () => document.getElementById('drawer').classList.toggle('expanded'));
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeModal(); closeDrawer(); } });
 }
 
-// Close drawer
-function closeDrawer() {
-    const drawer = document.getElementById('drawer');
-    drawer.classList.remove('translate-x-0', 'open');
-    drawer.classList.add('closed', 'translate-x-full');
-    isDrawerExpanded = false;
-}
-
-// Toggle drawer expanded/collapsed (mobile)
-function toggleDrawerExpanded() {
-    const drawer = document.getElementById('drawer');
-    const toggleBtn = document.getElementById('toggle-drawer');
-    isDrawerExpanded = !isDrawerExpanded;
-    
-    if (isDrawerExpanded) {
-        drawer.classList.remove('collapsed');
-        drawer.classList.add('expanded');
-        toggleBtn.innerHTML = '<i data-lucide="chevron-down" class="w-6 h-6"></i>';
-    } else {
-        drawer.classList.remove('expanded');
-        drawer.classList.add('collapsed');
-        toggleBtn.innerHTML = '<i data-lucide="chevron-up" class="w-6 h-6"></i>';
-    }
-    lucide.createIcons();
-}
-
-// Open modal
-function openModal(event, location) {
-    const modal = document.getElementById('modal');
-    const modalTitle = document.getElementById('modal-title');
-    const modalDescription = document.getElementById('modal-description');
-    const modalImages = document.getElementById('modal-images');
-    const modalNavText = document.getElementById('modal-nav-text');
-    
-    modalTitle.textContent = event.title;
-    modalDescription.textContent = event.description;
-    modalNavText.textContent = "Rizal's Home";
-    
-    // Update modal images
-    modalImages.innerHTML = '';
-    if (event.images && event.images.length > 0) {
-        // Show up to 2 images in modal (vertical stack)
-        event.images.slice(0, 2).forEach((imageUrl, index) => {
-            const img = document.createElement('img');
-            img.src = imageUrl;
-            img.alt = `${event.title} photo ${index + 1}`;
-            img.className = 'photo-item w-full h-64 object-cover rounded-lg';
-            modalImages.appendChild(img);
-        });
-    }
-    
-    modal.classList.remove('hidden');
-    lucide.createIcons();
-}
-
-// Close modal
-function closeModal() {
-    const modal = document.getElementById('modal');
-    modal.classList.add('hidden');
-}
-
-// Setup event listeners
-function setupEventListeners() {
-    // Close drawer button
-    document.getElementById('close-drawer').addEventListener('click', closeDrawer);
-    
-    // Toggle drawer button (mobile)
-    document.getElementById('toggle-drawer').addEventListener('click', toggleDrawerExpanded);
-    
-    // Drawer handle swipe gestures (mobile)
-    const drawerHandle = document.getElementById('drawer-handle');
-    let touchStartY = 0;
-    let touchEndY = 0;
-    
-    drawerHandle.addEventListener('touchstart', (e) => {
-        touchStartY = e.changedTouches[0].screenY;
-    }, false);
-    
-    drawerHandle.addEventListener('touchend', (e) => {
-        touchEndY = e.changedTouches[0].screenY;
-        handleSwipe(touchStartY, touchEndY);
-    }, false);
-    
-    // Handle swipe gestures
-    function handleSwipe(start, end) {
-        const swipeThreshold = 50;
-        const diff = start - end;
-        
-        if (Math.abs(diff) > swipeThreshold) {
-            if (diff > 0) {
-                // Swipe up - expand
-                if (!isDrawerExpanded) {
-                    toggleDrawerExpanded();
-                }
-            } else {
-                // Swipe down - collapse
-                if (isDrawerExpanded) {
-                    toggleDrawerExpanded();
-                }
-            }
-        }
-    }
-    
-    // Close modal button
-    document.getElementById('close-modal').addEventListener('click', closeModal);
-    
-    // Modal navigation button
-    document.getElementById('modal-nav-btn').addEventListener('click', () => {
-        closeModal();
-        openDrawer();
-    });
-    
-    // Next stop button
-    document.getElementById('next-stop-btn').addEventListener('click', () => {
-        const currentLocation = rizalData.find(l => l.id === currentLocationId);
-        if (currentLocation && currentLocation.next_stop_id) {
-            const nextLocation = rizalData.find(l => l.id === currentLocation.next_stop_id);
-            if (nextLocation) {
-                closeDrawer();
-                handleMarkerClick(nextLocation);
-            }
-        }
-    });
-    
-    // Close modal on backdrop click
-    document.getElementById('modal').addEventListener('click', (e) => {
-        if (e.target.id === 'modal') {
-            closeModal();
-        }
-    });
-    
-    // Close drawer on map click (optional)
-    map.on('click', () => {
-        // Uncomment to close drawer when clicking on map
-        // closeDrawer();
-    });
+function applyTheme() {
+    document.documentElement.dataset.theme = theme;
+    const brandSymbol = document.querySelector('.brand-symbol');
+    if (brandSymbol && !brandSymbol.querySelector('img')) { brandSymbol.textContent = ''; const image = document.createElement('img'); image.className = 'rizal-brand-portrait'; image.src = 'joserizal.svg?v=20261026'; image.alt = ''; image.setAttribute('aria-hidden', 'true'); brandSymbol.appendChild(image); }
+    document.querySelectorAll('#theme-toggle, #welcome-theme-toggle').forEach(toggle => { const dark = theme === 'dark'; toggle.setAttribute('aria-pressed', dark); toggle.setAttribute('aria-label', dark ? 'Switch to light mode' : 'Switch to dark mode'); toggle.querySelector('span').textContent = dark ? '☀' : '☾'; toggle.querySelector('.theme-toggle-label').textContent = dark ? 'Light mode' : 'Dark mode'; });
+    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', theme === 'dark' ? '#1d1b19' : '#f4efe6');
 }
