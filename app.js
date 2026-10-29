@@ -130,7 +130,21 @@ function updateDrawer(location) {
     loadStopFeedback(location.id);
     subscribeToStopFeedback(location.id);
     const next = rizalData.find(item => item.id === location.next_stop_id); document.getElementById('next-stop-text').textContent = next ? `Next: ${next.location_name}` : 'Journey complete'; document.getElementById('next-stop-btn').disabled = false;
+    const footer = document.querySelector('.drawer-footer');
+    if (!document.getElementById('read-article-btn')) { const readerButton = document.createElement('button'); readerButton.id = 'read-article-btn'; readerButton.className = 'button button-outline'; readerButton.innerHTML = '<span>Read this chapter</span><span>↗</span>'; readerButton.addEventListener('click', () => openArticleReader(currentLocationId)); footer.prepend(readerButton); }
 }
+
+function openArticleReader(locationId) {
+    const article = getArticleById(locationId);
+    if (!article) return;
+    renderArticleReader(document.getElementById('article-reader-content'), article, {
+        onPrevious: current => { const previous = rizalData.find(item => item.next_stop_id === current.locationId); if (previous) openArticleReader(previous.id); },
+        onNext: current => { if (current.metadata.nextStopId) openArticleReader(current.metadata.nextStopId); }
+    });
+    document.getElementById('article-reader-modal').classList.remove('hidden');
+}
+
+function closeArticleReader() { document.getElementById('article-reader-modal').classList.add('hidden'); }
 
 function renderRating(locationId) { const widget = document.getElementById('rating-widget'); widget.innerHTML = ''; const saved = ratings[locationId] || 0; for (let i = 1; i <= 5; i++) { const star = document.createElement('button'); star.type = 'button'; star.className = `star ${i <= saved ? 'is-selected' : ''}`; star.textContent = '★'; star.setAttribute('aria-label', `${i} stars`); star.setAttribute('aria-checked', i === saved); star.addEventListener('click', () => { ratings[locationId] = i; localStorage.setItem('rizalLocationRatings', JSON.stringify(ratings)); renderRating(locationId); }); widget.appendChild(star); } }
 
@@ -213,7 +227,8 @@ function bindEvents() {
     document.getElementById('close-reflection').addEventListener('click', () => document.getElementById('reflection-modal').classList.add('hidden')); document.getElementById('skip-journey-feedback').addEventListener('click', showJourneyThankYou); document.getElementById('finish-tour-btn').addEventListener('click', () => document.getElementById('reflection-modal').classList.add('hidden'));
     document.getElementById('next-stop-btn').addEventListener('click', () => { const here = rizalData.find(item => item.id === currentLocationId); const next = rizalData.find(item => item.id === here?.next_stop_id); if (next) chooseLocation(next); else { resetJourneyFeedbackModal(); renderJourneyRating(); document.getElementById('reflection-modal').classList.remove('hidden'); } });
     document.getElementById('drawer-handle').addEventListener('click', () => document.getElementById('drawer').classList.toggle('expanded'));
-    document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeModal(); closeDrawer(); } });
+    document.getElementById('close-article-reader').addEventListener('click', closeArticleReader); document.getElementById('article-reader-modal').addEventListener('click', e => { if (e.target.id === 'article-reader-modal') closeArticleReader(); });
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeModal(); closeArticleReader(); closeDrawer(); } });
 }
 
 function applyTheme() {
