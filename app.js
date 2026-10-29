@@ -7,6 +7,7 @@ let supabaseClient, stopFeedbackChannel, journeyFeedbackChannel;
 let commentsPage = 0;
 const COMMENTS_PAGE_SIZE = 3;
 let journeyFeedbackPage = 0;
+let pendingMemoryQuiz = null;
 const JOURNEY_FEEDBACK_PAGE_SIZE = 5;
 const JOURNEY_ANIMATION_DURATION = 1800;
 let ratings = JSON.parse(localStorage.getItem('rizalLocationRatings') || '{}');
@@ -139,7 +140,7 @@ function openArticleReader(locationId) {
     if (!article) return;
     renderArticleReader(document.getElementById('article-reader-content'), article, {
         onPrevious: current => { const previous = rizalData.find(item => item.next_stop_id === current.locationId); if (previous) openArticleReader(previous.id); },
-        onNext: current => { if (current.metadata.nextStopId) openArticleReader(current.metadata.nextStopId); }
+        onNext: current => { const next = rizalData.find(item => item.id === current.metadata.nextStopId); const previous = rizalData.find(item => item.id === current.locationId); if (next && previous) showMemoryQuiz(previous, next, () => openArticleReader(next.id)); }
     });
     document.getElementById('article-reader-modal').classList.remove('hidden');
 }
@@ -158,6 +159,27 @@ function openImageLightbox(src, alt = 'Archive image') {
 }
 
 function closeImageLightbox() { document.getElementById('image-lightbox')?.classList.add('hidden'); }
+
+function shuffle(items) { return [...items].sort(() => Math.random() - 0.5); }
+async function memoryQuizQuestion(previous, next) {
+    const questionBank = await (window.memoryQuestionsReady || Promise.resolve({}));
+    const questions = questionBank[previous.id] || [];
+    const question = questions[Math.floor(Math.random() * questions.length)];
+    return { ...question, context: `${previous.location_name} → ${next.location_name}` };
+}
+
+function finishMemoryQuiz() { const callback = pendingMemoryQuiz?.callback; pendingMemoryQuiz = null; document.getElementById('memory-quiz-modal').classList.add('hidden'); callback?.(); }
+async function showMemoryQuiz(previous, next, callback) {
+    const question = await memoryQuizQuestion(previous, next); pendingMemoryQuiz = { callback };
+    const content = document.getElementById('memory-quiz-content'); content.innerHTML = `<p class="memory-quiz-copy">Before moving on, take a moment to recall something from the stop you just visited and the chapter ahead.</p><div class="memory-quiz-actions"><button type="button" class="button button-dark" id="start-memory-quiz">Yes, test me <span>→</span></button><button type="button" class="button button-outline" id="skip-memory-quiz">Maybe later <span>×</span></button></div>`;
+    document.getElementById('memory-quiz-modal').classList.remove('hidden');
+    document.getElementById('start-memory-quiz').addEventListener('click', () => renderMemoryQuestion(question)); document.getElementById('skip-memory-quiz').addEventListener('click', finishMemoryQuiz);
+}
+function renderMemoryQuestion(question) {
+    const content = document.getElementById('memory-quiz-content'); content.innerHTML = `<p class="memory-quiz-context">${escapeHtml(question.context)}</p><h4 class="memory-quiz-question">${escapeHtml(question.prompt)}</h4><div class="memory-quiz-options">${question.options.map((option, index) => `<button type="button" class="button memory-quiz-option" data-answer-index="${index}">${escapeHtml(option)}</button>`).join('')}</div><p class="memory-quiz-feedback" aria-live="polite"></p><button type="button" class="button button-dark memory-quiz-next hidden">Continue to the next stop <span>→</span></button>`;
+    const buttons = [...content.querySelectorAll('[data-answer-index]')]; const feedback = content.querySelector('.memory-quiz-feedback'); const nextButton = content.querySelector('.memory-quiz-next');
+    buttons.forEach(button => button.addEventListener('click', () => { const selected = question.options[Number(button.dataset.answerIndex)]; buttons.forEach(option => { option.disabled = true; if (option.textContent === question.answer) option.classList.add('is-correct'); }); if (selected === question.answer) feedback.textContent = 'Correct — nicely remembered.'; else { button.classList.add('is-wrong'); feedback.textContent = `The answer was “${question.answer}.”`; } nextButton.classList.remove('hidden'); })); nextButton.addEventListener('click', finishMemoryQuiz);
+}
 
 function renderRating(locationId) { const widget = document.getElementById('rating-widget'); widget.innerHTML = ''; const saved = ratings[locationId] || 0; for (let i = 1; i <= 5; i++) { const star = document.createElement('button'); star.type = 'button'; star.className = `star ${i <= saved ? 'is-selected' : ''}`; star.textContent = '★'; star.setAttribute('aria-label', `${i} stars`); star.setAttribute('aria-checked', i === saved); star.addEventListener('click', () => { ratings[locationId] = i; localStorage.setItem('rizalLocationRatings', JSON.stringify(ratings)); renderRating(locationId); }); widget.appendChild(star); } }
 
@@ -238,10 +260,11 @@ function bindEvents() {
     document.getElementById('modal').addEventListener('click', e => { if (e.target.id === 'modal') closeModal(); }); document.getElementById('modal-nav-btn').addEventListener('click', closeModal);
     document.getElementById('stop-feedback-form').addEventListener('submit', submitStopFeedback); document.getElementById('journey-feedback-form').addEventListener('submit', submitJourneyFeedback); renderJourneyRating();
     document.getElementById('close-reflection').addEventListener('click', () => document.getElementById('reflection-modal').classList.add('hidden')); document.getElementById('skip-journey-feedback').addEventListener('click', showJourneyThankYou); document.getElementById('finish-tour-btn').addEventListener('click', () => document.getElementById('reflection-modal').classList.add('hidden'));
-    document.getElementById('next-stop-btn').addEventListener('click', () => { const here = rizalData.find(item => item.id === currentLocationId); const next = rizalData.find(item => item.id === here?.next_stop_id); if (next) chooseLocation(next); else { resetJourneyFeedbackModal(); renderJourneyRating(); document.getElementById('reflection-modal').classList.remove('hidden'); } });
+    document.getElementById('next-stop-btn').addEventListener('click', () => { const here = rizalData.find(item => item.id === currentLocationId); const next = rizalData.find(item => item.id === here?.next_stop_id); if (next) showMemoryQuiz(here, next, () => chooseLocation(next)); else { resetJourneyFeedbackModal(); renderJourneyRating(); document.getElementById('reflection-modal').classList.remove('hidden'); } });
     document.getElementById('drawer-handle').addEventListener('click', () => document.getElementById('drawer').classList.toggle('expanded'));
     document.getElementById('close-article-reader').addEventListener('click', closeArticleReader); document.getElementById('article-reader-modal').addEventListener('click', e => { if (e.target.id === 'article-reader-modal') closeArticleReader(); });
-    document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeModal(); closeArticleReader(); closeImageLightbox(); closeDrawer(); } });
+    document.getElementById('close-memory-quiz').addEventListener('click', finishMemoryQuiz); document.getElementById('memory-quiz-modal').addEventListener('click', event => { if (event.target.id === 'memory-quiz-modal') finishMemoryQuiz(); });
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeModal(); closeArticleReader(); closeImageLightbox(); if (!document.getElementById('memory-quiz-modal').classList.contains('hidden')) finishMemoryQuiz(); closeDrawer(); } });
 }
 
 function applyTheme() {
