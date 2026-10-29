@@ -123,7 +123,7 @@ function updateDrawer(location) {
     const events = document.getElementById('events-list'); events.innerHTML = '';
     location.significant_events.forEach(event => { const item = document.createElement('li'); item.className = 'event-item'; item.innerHTML = `<span>${event.title}</span><b>↗</b>`; item.addEventListener('click', () => openModal(event)); events.appendChild(item); });
     const gallery = document.getElementById('photo-grid'); gallery.innerHTML = '';
-    (location.images || []).slice(0, 4).forEach((src, i) => { const img = document.createElement('img'); img.src = src; img.alt = `${location.location_name} archive image ${i + 1}`; img.loading = 'lazy'; img.onerror = () => { img.style.visibility = 'hidden'; }; gallery.appendChild(img); });
+    (location.images || []).slice(0, 4).forEach((src, i) => { const img = document.createElement('img'); img.src = src; img.alt = `${location.location_name} archive image ${i + 1}`; img.loading = 'lazy'; img.addEventListener('click', () => openImageLightbox(src, img.alt)); img.onerror = () => { img.style.visibility = 'hidden'; }; gallery.appendChild(img); });
     renderRating(location.id);
     commentsPage = 0;
     ensureCommentsPagination();
@@ -145,6 +145,19 @@ function openArticleReader(locationId) {
 }
 
 function closeArticleReader() { document.getElementById('article-reader-modal').classList.add('hidden'); }
+
+function openImageLightbox(src, alt = 'Archive image') {
+    let lightbox = document.getElementById('image-lightbox');
+    if (!lightbox) {
+        lightbox = document.createElement('div'); lightbox.id = 'image-lightbox'; lightbox.className = 'modal-backdrop hidden'; lightbox.setAttribute('role', 'dialog'); lightbox.setAttribute('aria-modal', 'true'); lightbox.setAttribute('aria-label', 'Expanded archive image');
+        lightbox.innerHTML = '<figure class="image-lightbox-figure"><button type="button" class="icon-button image-lightbox-close" aria-label="Close expanded image">×</button><img class="image-lightbox-image"><figcaption class="image-lightbox-caption"></figcaption></figure>';
+        lightbox.addEventListener('click', event => { if (event.target === lightbox) closeImageLightbox(); }); document.body.appendChild(lightbox);
+        lightbox.querySelector('.image-lightbox-close').addEventListener('click', closeImageLightbox);
+    }
+    const image = lightbox.querySelector('.image-lightbox-image'); image.src = src; image.alt = alt; lightbox.querySelector('.image-lightbox-caption').textContent = alt; lightbox.classList.remove('hidden');
+}
+
+function closeImageLightbox() { document.getElementById('image-lightbox')?.classList.add('hidden'); }
 
 function renderRating(locationId) { const widget = document.getElementById('rating-widget'); widget.innerHTML = ''; const saved = ratings[locationId] || 0; for (let i = 1; i <= 5; i++) { const star = document.createElement('button'); star.type = 'button'; star.className = `star ${i <= saved ? 'is-selected' : ''}`; star.textContent = '★'; star.setAttribute('aria-label', `${i} stars`); star.setAttribute('aria-checked', i === saved); star.addEventListener('click', () => { ratings[locationId] = i; localStorage.setItem('rizalLocationRatings', JSON.stringify(ratings)); renderRating(locationId); }); widget.appendChild(star); } }
 
@@ -213,7 +226,7 @@ function showJourneyThankYou() { document.getElementById('journey-feedback-form-
 async function submitJourneyFeedback(event) { event.preventDefault(); const status = document.getElementById('journey-feedback-status'); const comment = document.getElementById('journey-feedback-comment').value.trim(); if (!comment) { showJourneyThankYou(); return; } status.textContent = 'Posting…'; try { await supabaseRequest('journey_feedback', { method: 'POST', headers: { Prefer: 'return=minimal' }, body: JSON.stringify({ rating: window.journeyRating || null, comment, display_name: document.getElementById('journey-feedback-name').value.trim() || 'Anonymous' }) }); event.target.reset(); showJourneyThankYou(); } catch (error) { status.textContent = 'Could not post yet. Check your Supabase configuration.'; console.warn(error); } }
 function openDrawer() { document.getElementById('drawer').classList.remove('closed'); document.getElementById('drawer').classList.add('open'); document.getElementById('journey-feedbacks-toggle')?.classList.add('drawer-open'); }
 function closeDrawer() { document.getElementById('drawer').classList.remove('open'); document.getElementById('drawer').classList.add('closed'); document.getElementById('journey-feedbacks-toggle')?.classList.remove('drawer-open'); }
-function openModal(event) { document.getElementById('modal-title').textContent = event.title; document.getElementById('modal-description').textContent = event.description; const images = document.getElementById('modal-images'); images.innerHTML = ''; (event.images || []).slice(0, 2).forEach((src, i) => { const img = document.createElement('img'); img.src = src; img.alt = `${event.title} image ${i + 1}`; img.onerror = () => img.remove(); images.appendChild(img); }); document.getElementById('modal').classList.remove('hidden'); }
+function openModal(event) { document.getElementById('modal-title').textContent = event.title; document.getElementById('modal-description').textContent = event.description; const images = document.getElementById('modal-images'); images.innerHTML = ''; (event.images || []).slice(0, 2).forEach((src, i) => { const img = document.createElement('img'); img.src = src; img.alt = `${event.title} image ${i + 1}`; img.addEventListener('click', () => openImageLightbox(src, img.alt)); img.onerror = () => img.remove(); images.appendChild(img); }); document.getElementById('modal').classList.remove('hidden'); }
 function closeModal() { document.getElementById('modal').classList.add('hidden'); }
 function bindEvents() {
     document.getElementById('close-drawer').addEventListener('click', closeDrawer); document.getElementById('close-modal').addEventListener('click', closeModal);
@@ -228,7 +241,7 @@ function bindEvents() {
     document.getElementById('next-stop-btn').addEventListener('click', () => { const here = rizalData.find(item => item.id === currentLocationId); const next = rizalData.find(item => item.id === here?.next_stop_id); if (next) chooseLocation(next); else { resetJourneyFeedbackModal(); renderJourneyRating(); document.getElementById('reflection-modal').classList.remove('hidden'); } });
     document.getElementById('drawer-handle').addEventListener('click', () => document.getElementById('drawer').classList.toggle('expanded'));
     document.getElementById('close-article-reader').addEventListener('click', closeArticleReader); document.getElementById('article-reader-modal').addEventListener('click', e => { if (e.target.id === 'article-reader-modal') closeArticleReader(); });
-    document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeModal(); closeArticleReader(); closeDrawer(); } });
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeModal(); closeArticleReader(); closeImageLightbox(); closeDrawer(); } });
 }
 
 function applyTheme() {
